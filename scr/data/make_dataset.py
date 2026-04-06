@@ -5,11 +5,17 @@ from typing import Iterable
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-from scr.data.data_download import download_all, merge_raw, START_DATE, END_DATE
+from scr.data.data_download import (
+    download_all,
+    merge_raw,
+    START_DATE,
+    END_DATE,
+)
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 
 FEATURE_COLS = [
@@ -63,6 +69,25 @@ def _engineer_features(merged: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _load_bundled_snapshot() -> pd.DataFrame:
+    """Load bundled snapshot data when live downloads are unavailable."""
+    raw_snapshot = RAW_DIR / "tesla_merged_dataset.csv"
+    processed_snapshot = PROCESSED_DIR / "tesla_processed_dataset.csv"
+
+    if raw_snapshot.exists():
+        logger.warning("Using bundled raw snapshot from %s", raw_snapshot)
+        merged = pd.read_csv(raw_snapshot, parse_dates=["Date"])
+        return _engineer_features(merged)
+
+    if processed_snapshot.exists():
+        logger.warning("Using bundled processed snapshot from %s", processed_snapshot)
+        return pd.read_csv(processed_snapshot, parse_dates=["Date"])
+
+    raise FileNotFoundError(
+        "No bundled fallback snapshot found in data/raw or data/processed."
+    )
+
+
 # ── Public entry point (same interface as before) ─────────────────────
 def load_phase2_data(
     start: str = START_DATE,
@@ -72,9 +97,14 @@ def load_phase2_data(
     logger.info(
         "Downloading & saving data (external → data/external/, merged → data/raw/) ..."
     )
-    datasets = download_all(start, end, fred_api_key=fred_api_key)
-    merged = merge_raw(datasets)
-    df = _engineer_features(merged)
+    try:
+        datasets = download_all(start, end, fred_api_key=fred_api_key)
+        merged = merge_raw(datasets)
+        df = _engineer_features(merged)
+    except Exception as exc:
+        logger.warning("Live data download failed, using bundled snapshot: %s", exc)
+        df = _load_bundled_snapshot()
+
     df = df.sort_values("Date").reset_index(drop=True)
     logger.info(
         "Dataset ready: %d rows, date range %s to %s",

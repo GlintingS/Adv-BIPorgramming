@@ -2,9 +2,15 @@
 .streamlit/secrets.toml
 
 # Data cache (downloaded at runtime)
-data/external/
-data/raw/
-data/processed/
+data/external/*
+!data/external/.gitkeep
+!data/external/*.csv
+data/raw/*
+!data/raw/.gitkeep
+!data/raw/*.csv
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/*.csv
 data/interim/
 
 # Trained model artifacts

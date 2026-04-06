@@ -136,8 +136,8 @@ except Exception as exc:
     logger.exception("Streamlit pipeline failed")
     st.error(f"**Data pipeline failed:** {exc}")
     st.info(
-        "If running on Streamlit Cloud, set `FRED_API_KEY` in **App settings → Secrets**. "
-        "If the message mentions Yahoo Finance or a ticker like `^NDX`, use **Refresh Data** or redeploy the app to retry the market data download."
+        "The app now tries live downloads first and falls back to bundled snapshot CSV files. "
+        "If this still fails on Streamlit Cloud, confirm the repo contains the `data/external`, `data/raw`, and `data/processed` CSV snapshots and set `FRED_API_KEY` in **App settings → Secrets** for best reliability."
     )
     st.stop()
 
