@@ -1,0 +1,41 @@
+# Secrets
+.streamlit/secrets.toml
+
+# Data cache (downloaded at runtime)
+data/external/
+data/raw/
+data/processed/
+data/interim/
+
+# Trained model artifacts
+models/*.pkl
+
+# Reports (generated)
+reports/
+
+# Runtime logs
+pipeline.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environments
+.env
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/

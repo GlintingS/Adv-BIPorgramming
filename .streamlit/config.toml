@@ -1,0 +1,15 @@
+[theme]
+primaryColor = "#3498db"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f7fa"
+textColor = "#2c3e50"
+
+[server]
+headless = true
+maxUploadSize = 50
+maxMessageSize = 200
+enableXsrfProtection = true
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
