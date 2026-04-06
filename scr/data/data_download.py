@@ -24,6 +24,13 @@ START_DATE = "2018-01-01"
 END_DATE = "2026-12-31"
 MAX_DOWNLOAD_RETRIES = 3
 
+MARKET_PROXY_MAP = {
+    "TSLA": ("tsla.us", None),
+    "^GSPC": ("spy.us", "SPY proxy for S&P 500"),
+    "^NDX": ("qqq.us", "QQQ proxy for NASDAQ-100"),
+    "^VIX": ("vixy.us", "VIXY proxy for VIX"),
+}
+
 
 # ── Helper: download a single yfinance ticker ────────────────────────
 def _download_ticker(ticker: str, start: str = START_DATE, end: str = END_DATE) -> pd.DataFrame:
@@ -58,10 +65,83 @@ def _download_ticker(ticker: str, start: str = START_DATE, end: str = END_DATE) 
     return raw.sort_values("Date").reset_index(drop=True)
 
 
+def _download_stooq_proxy(
+    symbol: str,
+    start: str,
+    end: str,
+) -> pd.DataFrame:
+    """Download a public daily CSV from Stooq as a fallback market data source."""
+    url = f"https://stooq.com/q/d/l/?s={symbol}&i=d"
+    raw = pd.read_csv(url)
+    if raw.empty or "Date" not in raw.columns or "Close" not in raw.columns:
+        raise RuntimeError(f"Stooq returned no usable data for {symbol}.")
+
+    raw["Date"] = pd.to_datetime(raw["Date"], errors="coerce")
+    raw = raw.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+    start_ts = pd.to_datetime(start)
+    end_ts = pd.to_datetime(end)
+    raw = raw[(raw["Date"] >= start_ts) & (raw["Date"] <= end_ts)].reset_index(drop=True)
+    if raw.empty:
+        raise RuntimeError(f"Stooq returned no rows for {symbol} in range.")
+
+    return raw
+
+
+def _download_market_dataset(
+    ticker: str,
+    start: str,
+    end: str,
+) -> pd.DataFrame:
+    """Download market data from Yahoo Finance first, then fall back to a public proxy source."""
+    try:
+        return _download_ticker(ticker, start, end)
+    except RuntimeError as yahoo_error:
+        proxy_symbol, proxy_label = MARKET_PROXY_MAP.get(ticker, (None, None))
+        if not proxy_symbol:
+            raise
+
+        logger.warning(
+            "Yahoo Finance failed for %s: %s. Trying Stooq fallback %s.",
+            ticker,
+            yahoo_error,
+            proxy_symbol,
+        )
+        proxy_df = _download_stooq_proxy(proxy_symbol, start, end)
+        if proxy_label:
+            logger.warning("Using %s for %s fallback.", proxy_label, ticker)
+        return proxy_df
+
+
 def _load_cached_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Cache file not found: {path}")
     return pd.read_csv(path, parse_dates=["Date"])
+
+
+def _download_fred_public_csv(
+    series_id: str,
+    col_name: str,
+    start: str,
+    end: str,
+) -> pd.DataFrame:
+    """Download a FRED series without API key using the public CSV endpoint."""
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+    raw = pd.read_csv(url)
+    if "DATE" not in raw.columns or series_id not in raw.columns:
+        raise RuntimeError(f"Unexpected FRED public CSV format for {series_id}.")
+
+    df = raw.rename(columns={"DATE": "Date", series_id: col_name})
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
+    df = df.dropna(subset=["Date"])
+
+    start_ts = pd.to_datetime(start)
+    end_ts = pd.to_datetime(end)
+    df = df[(df["Date"] >= start_ts) & (df["Date"] <= end_ts)].reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError(f"FRED public CSV returned no rows for {series_id} in range.")
+
+    return df
 
 
 # ── Public API ────────────────────────────────────────────────────────
@@ -97,7 +177,7 @@ def download_all(
     for ticker, filename in ticker_map.items():
         path = ext_dir / filename
         try:
-            df = _download_ticker(ticker, start, end)
+            df = _download_market_dataset(ticker, start, end)
             df.to_csv(path, index=False)
             logger.info("Saved %s → %s (%d rows)", ticker, path, len(df))
         except RuntimeError:
@@ -139,6 +219,18 @@ def download_all(
                     if attempt < MAX_DOWNLOAD_RETRIES:
                         time.sleep(2 * attempt)
         if series is None:
+            # Try public CSV endpoint when API key is missing or API call failed.
+            try:
+                logger.info("Downloading FRED public CSV: %s ...", series_id)
+                df = _download_fred_public_csv(series_id, col_name, start, end)
+                path = ext_dir / filename
+                df.to_csv(path, index=False)
+                logger.info("Saved %s (public CSV) -> %s (%d rows)", series_id, path, len(df))
+                datasets[series_id] = df
+                continue
+            except Exception as e:
+                logger.warning("FRED public CSV %s failed: %s", series_id, e)
+
             # Fall back to existing CSV if available
             fallback = ext_dir / filename
             if fallback.exists():
